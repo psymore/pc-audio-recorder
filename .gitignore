@@ -9,6 +9,7 @@ settings.json
 # PyInstaller / packaging output
 build/
 dist/
+dist_installer/
 *.spec
 
 # Editor/OS

@@ -495,9 +495,32 @@ class RecorderApp:
         if self.is_recording:
             self.stop_recording()
             time.sleep(0.2)
+        _release_single_instance_lock()  # so the freshly spawned copy can acquire it
         subprocess.Popen([sys.executable] + sys.argv, close_fds=True)
         self.root.destroy()
         os._exit(0)
+
+
+_SINGLE_INSTANCE_MUTEX_NAME = "PCAudioRecorder_SingleInstance"
+_single_instance_handle = None
+
+
+def _acquire_single_instance_lock():
+    """True if this is the only running copy; False if another instance already holds the lock."""
+    global _single_instance_handle
+    ERROR_ALREADY_EXISTS = 183
+    handle = ctypes.windll.kernel32.CreateMutexW(None, False, _SINGLE_INSTANCE_MUTEX_NAME)
+    if ctypes.windll.kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        return False
+    _single_instance_handle = handle  # keep a reference; released explicitly on refresh, or by the OS on exit
+    return True
+
+
+def _release_single_instance_lock():
+    global _single_instance_handle
+    if _single_instance_handle:
+        ctypes.windll.kernel32.CloseHandle(_single_instance_handle)
+        _single_instance_handle = None
 
 
 def _show_crash_dialog(exc_type, exc_value, exc_tb):
@@ -516,6 +539,11 @@ def _show_crash_dialog(exc_type, exc_value, exc_tb):
 
 
 def main():
+    if not _acquire_single_instance_lock():
+        ctypes.windll.user32.MessageBoxW(
+            None, "System Audio Recorder is already running.", "Already running", 0x40
+        )
+        return
     sys.excepthook = _show_crash_dialog
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("AudioRecorder.WavRecorder")
     root = tk.Tk()

@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+
+# App data (user recordings, local runtime state)
+Recordings/*.wav
+settings.json
+
+# PyInstaller / packaging output
+build/
+dist/
+*.spec
+
+# Editor/OS
+.vscode/
+Thumbs.db

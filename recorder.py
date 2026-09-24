@@ -6,6 +6,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import wave
 import winreg
 from ctypes import wintypes
@@ -24,11 +25,17 @@ COLOR_MUTED = "#888888"
 SAMPLE_RATE = 48000
 CHANNELS = 2
 CHUNK_FRAMES = 1024
-DEFAULT_OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Recordings")
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
+# Where the app itself lives (bundled icons are read-only, next to the exe/script).
+APP_DIR = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
 ICONS_DIR = os.path.join(APP_DIR, "icons")
-SETTINGS_PATH = os.path.join(APP_DIR, "settings.json")
+
+# Where the app writes (settings + default recordings). Program Files and similar
+# install locations aren't writable without admin, so user data goes under
+# %LOCALAPPDATA% instead of next to the exe.
+DATA_DIR = os.path.join(os.getenv("LOCALAPPDATA") or APP_DIR, "AudioRecorder")
+DEFAULT_OUTPUT_DIR = os.path.join(DATA_DIR, "Recordings")
+SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 DEFAULT_ICON = "Wave 5 blocks"
 ICON_SECRET_CODE = "1327"
 ICON_CODE_TIMEOUT = 2.0  # seconds allowed between keystrokes of the secret code
@@ -85,6 +92,7 @@ def _load_settings():
 
 def _save_settings(settings):
     try:
+        os.makedirs(DATA_DIR, exist_ok=True)
         with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
             json.dump(settings, f, indent=2)
     except OSError:
@@ -492,9 +500,28 @@ class RecorderApp:
         os._exit(0)
 
 
+def _show_crash_dialog(exc_type, exc_value, exc_tb):
+    """Last-resort handler so a windowed (--noconsole) build never fails silently."""
+    details = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(os.path.join(DATA_DIR, "crash.log"), "a", encoding="utf-8") as f:
+            f.write(f"\n--- {datetime.now().isoformat()} ---\n{details}")
+    except OSError:
+        pass
+    try:
+        messagebox.showerror("Unexpected error", f"{exc_value}\n\nDetails saved to crash.log")
+    except tk.TclError:
+        pass
+
+
 def main():
+    sys.excepthook = _show_crash_dialog
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("AudioRecorder.WavRecorder")
     root = tk.Tk()
+    # Tkinter swallows exceptions raised inside widget callbacks (button clicks, etc.)
+    # and routes them here instead of to sys.excepthook.
+    root.report_callback_exception = _show_crash_dialog
     saved_icon = _load_settings().get("icon")
     icon_name = saved_icon if saved_icon in _available_icons() else DEFAULT_ICON
     apply_icon(root, icon_name)
